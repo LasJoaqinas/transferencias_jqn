@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ordenador de transferencias</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#667085;--bd:#dfe3e8;--ac:#1f6feb;--acx:#fff}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14171a;--card:#1d2125;--tx:#e8eaed;--mut:#9aa3ad;--bd:#2c3238;--ac:#4c8dff;--acx:#0b1220}}
+:root[data-theme="dark"]{--bg:#14171a;--card:#1d2125;--tx:#e8eaed;--mut:#9aa3ad;--bd:#2c3238;--ac:#4c8dff;--acx:#0b1220}
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:22px;margin:0 0 4px}
+p.s{color:var(--mut);margin:0 0 16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:16px}
+textarea{width:100%;height:130px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);padding:10px;font:12px/1.4 ui-monospace,monospace;resize:vertical}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}
+button{border:1px solid var(--bd);background:var(--card);color:var(--tx);padding:8px 14px;border-radius:8px;font:inherit;cursor:pointer}
+button.p{background:var(--ac);color:var(--acx);border-color:var(--ac)}
+select{border:1px solid var(--bd);background:var(--card);color:var(--tx);padding:8px;border-radius:8px;font:inherit}
+.sum{display:flex;gap:24px;flex-wrap:wrap}
+.sum div span{display:block;color:var(--mut);font-size:12px}
+.sum div b{font-size:20px}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%}
+th,td{padding:8px 10px;border-bottom:1px solid var(--bd);text-align:left;white-space:nowrap}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+th{color:var(--mut);font-weight:600;font-size:13px}
+#msg{color:var(--mut);font-size:13px}
+@media print{@page{margin:12mm}body,.card{background:#fff!important;color:#000!important}.card{border:0!important;padding:0!important}#inp,.s,.row{display:none!important}main{max-width:none;padding:0}h1{font-size:16px}table{font-size:11px}th,td{color:#000!important;border-bottom:1px solid #999!important;padding:3px 6px}.sum b{font-size:14px}.sum div span{color:#000}.tw{overflow:visible}tr{break-inside:avoid}}
+</style>
+</head>
+<body>
+<main>
+<h1>Ordenador de transferencias</h1>
+<p class="s">Pegá la tabla completa (con los encabezados). Se queda solo con fecha y hora, número de comprobante e importe.</p>
+
+<div class="card" id="inp">
+  <textarea id="in" placeholder="Pegá acá la tabla copiada desde tu sistema…"></textarea>
+  <div class="row">
+    <button class="p" id="go">Extraer datos</button>
+    <button id="clr">Limpiar</button>
+    <span id="msg"></span>
+  </div>
+</div>
+
+<div class="card" id="res" hidden>
+  <div class="sum">
+    <div><span>Transferencias</span><b id="cnt">0</b></div>
+    <div><span>Total</span><b id="tot">0</b></div>
+  </div>
+  <div class="row">
+    <select id="ord">
+      <option value="orig">Orden original</option>
+      <option value="fa">Fecha: más antigua primero</option>
+      <option value="fd">Fecha: más reciente primero</option>
+      <option value="ia">Importe: menor a mayor</option>
+      <option value="id">Importe: mayor a menor</option>
+    </select>
+    <button id="cp">Copiar (para Excel)</button>
+    <button id="dl">Descargar CSV</button>
+    <button class="p" id="pr">Descargar PDF</button>
+  </div>
+  <div class="tw" style="margin-top:12px">
+    <table><thead><tr><th>Fecha</th><th>Hora</th><th>N° comprobante</th><th>Billetera</th><th class="n">Importe</th></tr></thead><tbody id="tb"></tbody></table>
+  </div>
+</div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+let rows=[];
+const $=id=>document.getElementById(id);
+const num=s=>parseFloat(String(s).replace(/\./g,'').replace(',','.'))||0;
+const fmt=n=>n.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
+function pdate(s){const m=s.match(/(\d+)\/(\d+)\/(\d+)\s+(\d+):(\d+):?(\d+)?/);return m?new Date(+m[3],+m[2]-1,+m[1],+m[4],+m[5],+(m[6]||0)).getTime():0}
+
+function parse(text){
+  const lines=text.split(/\r?\n/).filter(l=>l.trim()!=='');
+  if(!lines.length)return[];
+  const head=lines[0].split('\t').map(h=>h.trim());
+  const iF=head.indexOf('Fecha');
+  const iN=head.indexOf('Número de comprobante');
+  const iI=head.lastIndexOf('Importe');
+  const iB=head.lastIndexOf('Banco');
+  if(iF<0||iN<0||iI<0)throw new Error('No encontré las columnas "Fecha", "Número de comprobante" e "Importe". Pegá la tabla incluyendo la fila de encabezados.');
+  const out=[];
+  for(const l of lines.slice(1)){
+    const c=l.split('\t');
+    const f=(c[iF]||'').trim(),n=(c[iN]||'').trim(),i=(c[iI]||'').trim();
+    const b=iB>=0?(c[iB]||'').trim():'';
+    if(f&&n&&i){const p=f.split(/\s+/);out.push({f,d:p[0]||'',h:p[1]||'',n,i,m:/mercado\s*pago/i.test(b)?'Mercado Pago':'Otra',t:pdate(f),v:num(i)})}
+  }
+  return out;
+}
+
+function render(){
+  const o=$('ord').value;
+  const r=[...rows];
+  if(o==='fa')r.sort((a,b)=>a.t-b.t);
+  if(o==='fd')r.sort((a,b)=>b.t-a.t);
+  if(o==='ia')r.sort((a,b)=>a.v-b.v);
+  if(o==='id')r.sort((a,b)=>b.v-a.v);
+  $('tb').innerHTML=r.map(x=>`<tr><td>${x.d}</td><td>${x.h}</td><td>${x.n}</td><td>${x.m}</td><td class="n">${x.i}</td></tr>`).join('');
+  $('cnt').textContent=r.length;
+  $('tot').textContent=fmt(rows.reduce((s,x)=>s+x.v,0));
+  $('res').hidden=!r.length;
+  return r;
+}
+function current(){
+  const o=$('ord').value;const r=[...rows];
+  if(o==='fa')r.sort((a,b)=>a.t-b.t);
+  if(o==='fd')r.sort((a,b)=>b.t-a.t);
+  if(o==='ia')r.sort((a,b)=>a.v-b.v);
+  if(o==='id')r.sort((a,b)=>b.v-a.v);
+  return r;
+}
+
+$('go').onclick=()=>{
+  try{rows=parse($('in').value);$('msg').textContent=rows.length?'':'No se encontraron filas.';render()}
+  catch(e){$('msg').textContent=e.message;$('res').hidden=true}
+};
+$('ord').onchange=render;
+$('clr').onclick=()=>{$('in').value='';rows=[];$('res').hidden=true;$('msg').textContent=''};
+const TH=['Fecha','Hora','N° comprobante','Billetera','Importe'];
+function legacyCopy(t){const a=document.createElement('textarea');a.value=t;a.style.cssText='position:fixed;opacity:0;top:0;left:0';document.body.appendChild(a);a.select();let ok=false;try{ok=document.execCommand('copy')}catch(e){}a.remove();return ok}
+async function saveFile(name,data){
+  let dl=null;
+  try{dl=window.claude?await claude.use('downloads'):null}catch(e){}
+  if(!dl){
+    try{
+      const mime=name.endsWith('.pdf')?'application/pdf':'text/csv;charset=utf-8';
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(new Blob([data],{type:mime}));
+      a.download=name;document.body.appendChild(a);a.click();a.remove();
+      $('msg').textContent='Descargado.';
+    }catch(e){$('msg').textContent='No se pudo descargar el archivo.'}
+    return;
+  }
+  try{await dl.save({filename:name,data});$('msg').textContent='Listo.'}
+  catch(e){$('msg').textContent=(e&&e.code==='declined')?'Descarga cancelada.':'No se pudo guardar ('+((e&&e.code)||'error')+').'}
+}
+$('cp').onclick=async()=>{
+  const t=TH.join('\t')+'\n'+current().map(x=>`${x.d}\t${x.h}\t${x.n}\t${x.m}\t${x.i}`).join('\n');
+  let ok=false;
+  try{await navigator.clipboard.writeText(t);ok=true}catch(e){ok=legacyCopy(t)}
+  $('msg').textContent=ok?'Copiado. Pegalo en Excel o Sheets.':'No pude copiar; probá con Descargar CSV.';
+};
+$('dl').onclick=()=>{
+  const t='\ufeff'+TH.join(';')+'\n'+current().map(x=>`${x.d};${x.h};${x.n};${x.m};${x.i}`).join('\n');
+  saveFile('transferencias.csv',t);
+};
+$('pr').onclick=()=>{
+  if(!window.jspdf){$('msg').textContent='No se pudo cargar el generador de PDF.';return}
+  const r=current();
+  const d=new window.jspdf.jsPDF({unit:'mm',format:'a4'});
+  let y=18;
+  d.setFont('helvetica','bold');d.setFontSize(14);d.text('Transferencias',15,y);y+=6;
+  d.setFont('helvetica','normal');d.setFontSize(10);
+  d.text(r.length+' transferencias  |  Total: '+fmt(rows.reduce((s,x)=>s+x.v,0)),15,y);y+=9;
+  const head=()=>{d.setFont('helvetica','bold');d.setFontSize(10);
+    d.text(TH[0],15,y);d.text(TH[1],45,y);d.text(TH[2],72,y);d.text(TH[3],110,y);d.text(TH[4],195,y,{align:'right'});
+    y+=2;d.setLineWidth(0.3);d.line(15,y,195,y);y+=5.5;d.setFont('helvetica','normal')};
+  head();
+  for(const x of r){
+    if(y>282){d.addPage();y=18;head()}
+    d.text(x.d,15,y);d.text(x.h,45,y);d.text(x.n,72,y);d.text(x.m,110,y);d.text(x.i,195,y,{align:'right'});
+    d.setLineWidth(0.1);d.setDrawColor(190);d.line(15,y+1.8,195,y+1.8);d.setDrawColor(0);
+    y+=6.5;
+  }
+  const first=(r[0]&&r[0].d||'').replace(/\//g,'-');
+  saveFile('transferencias'+(first?'_'+first:'')+'.pdf',d.output('arraybuffer'));
+};
+</script>
+</body>
+</html>

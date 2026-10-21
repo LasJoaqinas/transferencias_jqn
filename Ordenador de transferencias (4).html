@@ -92,7 +92,18 @@ function parse(text){
     const c=l.split('\t');
     const f=(c[iF]||'').trim(),n=(c[iN]||'').trim(),i=(c[iI]||'').trim();
     const b=iB>=0?(c[iB]||'').trim():'';
-    if(f&&n&&i){const p=f.split(/\s+/);out.push({f,d:p[0]||'',h:p[1]||'',n,i,m:/mercado\s*pago/i.test(b)?'Mercado Pago':'Otra',t:pdate(f),v:num(i)})}
+    if(f&&n&&i){
+      const p=f.split(/\s+/);
+      
+      let m = 'Otra';
+      if (/mercado\s*pago/i.test(b)) {
+        m = 'Mercado Pago';
+      } else if (/1111111|a\.?b\.?n\.?\s*amro/i.test(b)) {
+        m = 'Financiera';
+      }
+
+      out.push({f,d:p[0]||'',h:p[1]||'',n,i,m,t:pdate(f),v:num(i)});
+    }
   }
   return out;
 }
